@@ -1,0 +1,57 @@
+# Anchor framework
+.anchor
+target
+**/*.rs.bk
+
+# Dependencies
+node_modules
+.yarn
+yarn.lock
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Solana
+test-ledger
+.ledger
+.solana
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Build artifacts
+dist/
+build/
+
+# Temporary files
+*.tmp
+*.temp
+temp_header.txt
+
+# Solana release files (large binary files)
+solana-release/
+solana-release-*.tar.bz2
+solana-install-init.sh
