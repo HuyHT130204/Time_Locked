@@ -1,0 +1,33 @@
+# Ignore unnecessary files for Vercel deployment
+timelock-wallet/
+node_modules/
+.git/
+*.log
+*.tmp
+*.temp
+
+# Ignore development files
+.env.local
+.env.development.local
+.env.test.local
+
+# Ignore build artifacts
+frontend/.next/
+frontend/out/
+frontend/build/
+
+# Ignore large binary files
+*.tar.bz2
+*.zip
+*.rar
+*.7z
+
+# Ignore IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
