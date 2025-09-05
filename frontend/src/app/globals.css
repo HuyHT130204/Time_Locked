@@ -1,0 +1,169 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #000000;
+  --color-foreground: #ffffff;
+  --color-gray-800: #1f2937;
+  --color-gray-600: #4b5563;
+  --color-gray-700: #374151;
+  --color-blue-400: #60a5fa;
+  --color-blue-600: #2563eb;
+  --color-blue-700: #1d4ed8;
+  --color-purple-400: #a78bfa;
+  --color-purple-600: #9333ea;
+  --color-purple-700: #7c3aed;
+  --color-green-400: #4ade80;
+  --color-green-600: #16a34a;
+  --color-green-700: #15803d;
+  --color-emerald-600: #059669;
+  --color-emerald-700: #047857;
+  --color-yellow-500: #eab308;
+  --color-red-400: #f87171;
+  --color-red-500: #ef4444;
+  --color-red-900: #7f1d1d;
+  --color-pink-600: #db2777;
+  --color-pink-700: #be185d;
+  --color-black: #000000;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  
+  body {
+    font-family: var(--font-geist-sans), system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background: var(--color-background);
+    color: var(--color-foreground);
+  }
+}
+
+@layer components {
+  .glass-effect {
+    background: rgba(31, 41, 55, 0.2);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(75, 85, 99, 0.3);
+  }
+  
+  .gradient-text {
+    background: linear-gradient(to right, var(--color-blue-400), var(--color-purple-400));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  
+  .btn-primary {
+    background: linear-gradient(to right, var(--color-blue-600), var(--color-purple-600));
+    border-radius: 0.75rem;
+    padding: 0.75rem 1.5rem;
+    font-weight: 600;
+    transition: all 0.2s;
+  }
+  
+  .btn-primary:hover {
+    background: linear-gradient(to right, var(--color-blue-700), var(--color-purple-700));
+  }
+  
+  .btn-secondary {
+    background: linear-gradient(to right, var(--color-green-600), var(--color-emerald-600));
+    border-radius: 0.75rem;
+    padding: 0.75rem 1.5rem;
+    font-weight: 600;
+    transition: all 0.2s;
+  }
+  
+  .btn-secondary:hover {
+    background: linear-gradient(to right, var(--color-green-700), var(--color-emerald-700));
+  }
+  
+  .input-field {
+    background: rgba(31, 41, 55, 0.5);
+    border: 1px solid var(--color-gray-600);
+    border-radius: 0.75rem;
+    padding: 0.75rem 1rem;
+    transition: all 0.2s;
+  }
+  
+  .input-field:focus {
+    outline: none;
+    border-color: var(--color-blue-600);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+  }
+}
+
+@layer utilities {
+  .animate-pulse-slow {
+    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  
+  .text-shadow {
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+/* Wallet button customization */
+.wallet-adapter-button {
+  background: linear-gradient(to right, var(--color-blue-600), var(--color-purple-600)) !important;
+}
+
+.wallet-adapter-button:not([disabled]):hover {
+  background: linear-gradient(to right, var(--color-blue-700), var(--color-purple-700)) !important;
+}
+
+.wallet-adapter-button-trigger {
+  border-radius: 0.75rem !important;
+}
+
+.wallet-adapter-modal-wrapper {
+  background: rgba(0, 0, 0, 0.8) !important;
+  backdrop-filter: blur(8px) !important;
+}
+
+.wallet-adapter-modal {
+  background: var(--color-gray-800) !important;
+  border: 1px solid var(--color-gray-700) !important;
+  border-radius: 1rem !important;
+}
+
+.wallet-adapter-modal-title {
+  color: var(--color-foreground) !important;
+}
+
+.wallet-adapter-modal-list {
+  background: var(--color-gray-800) !important;
+  border-radius: 0.75rem !important;
+}
+
+.wallet-adapter-modal-list-item {
+  border-radius: 0.5rem !important;
+  transition: background-color 0.2s !important;
+}
+
+.wallet-adapter-modal-list-item:hover {
+  background: var(--color-gray-700) !important;
+}
+
+.wallet-adapter-modal-list-item-text {
+  color: var(--color-foreground) !important;
+}

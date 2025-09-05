@@ -1,0 +1,30 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useWallet, useConnection } from "@solana/wallet-adapter-react";
+
+import { LAMPORTS_PER_SOL, PublicKey, SystemProgram } from "@solana/web3.js";
+import * as anchor from "@coral-xyz/anchor";
+import { getAnchorProgram } from "@/lib/anchorClient";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
+import dynamic from "next/dynamic";
+
+// Dynamic import để tránh hydration mismatch
+const DynamicWalletMultiButton = dynamic(
+  () => import("@solana/wallet-adapter-react-ui").then(mod => ({ default: mod.WalletMultiButton })),
+  { ssr: false }
+);
+
+const TIME_LOCK_SEED = Buffer.from("time-lock");
+
+interface TimeLockInfo {
+  publicKey: PublicKey;
+  amount: number;
+  unlockTimestamp: number;
+  kind: "SOL" | "SPL";
+  mint?: PublicKey;
+
+interface ProgramResult {
+  program?: anchor.Program;
+
+  mint?: PublicKey;
