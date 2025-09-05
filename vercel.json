@@ -1,18 +1,7 @@
 {
-  "functions": {
-    "frontend/src/app/page.tsx": {
-      "maxDuration": 30
-    }
-  },
-  "buildCommand": "cd frontend && npm run build",
+  "buildCommand": "cd frontend && npm install && npm run build",
   "outputDirectory": "frontend/.next",
-  "installCommand": "cd frontend && npm ci --only=production",
+  "installCommand": "cd frontend && npm install",
   "framework": "nextjs",
-  "regions": ["iad1"],
-  "env": {
-    "NEXT_PUBLIC_RPC_URL": "https://api.devnet.solana.com",
-    "NEXT_PUBLIC_PROGRAM_ID": "GSkBEUdNJCrVP7TyXWxWTCyeCACCXAKPN5gQMFWKgxic",
-    "NEXT_PUBLIC_USDC_MINT": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-    "NEXT_PUBLIC_USDC_FAUCET_URL": "https://faucet.circle.com/devnet"
-  }
+  "regions": ["iad1"]
 }

@@ -1,26 +1,16 @@
-# Ignore unnecessary files for Vercel deployment
+# Ignore smart contract directory
 timelock-wallet/
-node_modules/
-.git/
-*.log
-*.tmp
-*.temp
-
-# Ignore development files
-.env.local
-.env.development.local
-.env.test.local
-
-# Ignore build artifacts
-frontend/.next/
-frontend/out/
-frontend/build/
 
 # Ignore large binary files
 *.tar.bz2
 *.zip
 *.rar
 *.7z
+
+# Ignore development files
+.env.local
+.env.development.local
+.env.test.local
 
 # Ignore IDE files
 .vscode/
@@ -31,3 +21,6 @@ frontend/build/
 # Ignore OS files
 .DS_Store
 Thumbs.db
+
+# Ignore git files
+.git/
