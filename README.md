@@ -25,9 +25,8 @@ Create a `.env.local` file in the `frontend/` directory:
 
 ```env
 NEXT_PUBLIC_RPC_URL=https://api.devnet.solana.com
-NEXT_PUBLIC_PROGRAM_ID=GSkBEUdNJCrVP7TyXWxWTCyeCACCXAKPN5gQMFWKgxic
+NEXT_PUBLIC_PROGRAM_ID=8LQG6U5AQKe9t97ogxMtggbr24QgUKNFz22qvVPzBYYe
 NEXT_PUBLIC_USDC_MINT=4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU
-NEXT_PUBLIC_USDC_FAUCET_URL=https://faucet.circle.com/devnet
 ```
 
 ### 2. Build and Deploy Program
