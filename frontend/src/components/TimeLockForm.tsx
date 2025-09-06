@@ -189,6 +189,16 @@ export default function TimeLockForm() {
     
     const handleError = (error: any) => {
       console.error("Wallet error:", error);
+      const errorMessage = error?.message || String(error);
+      
+      // Don't show wallet connection error for user cancellations
+      if (errorMessage.includes("User rejected") || 
+          errorMessage.includes("Transaction cancelled") ||
+          errorMessage.includes("cancelled")) {
+        console.log("User cancelled transaction, not showing wallet error");
+        return;
+      }
+      
       setWalletError("Wallet connection error. Please reconnect.");
     };
     
@@ -418,7 +428,9 @@ export default function TimeLockForm() {
         throw new Error("Wallet disconnected unexpectedly. Please:\n• Disconnect your wallet\n• Refresh the page\n• Reconnect and try again");
       }
       
-      if (errorMessage.includes("Transaction cancelled")) {
+      if (errorMessage.includes("Transaction cancelled") || 
+          errorMessage.includes("User rejected") ||
+          errorMessage.includes("cancelled")) {
         throw new Error("Transaction was cancelled");
       }
       
@@ -1201,7 +1213,9 @@ export default function TimeLockForm() {
   const formatErrorMessage = (errorMessage: string): string => {
     const lowerError = errorMessage.toLowerCase();
     
-    if (lowerError.includes("user rejected")) {
+    if (lowerError.includes("transaction was cancelled") || lowerError.includes("cancelled")) {
+      return "Transaction was cancelled";
+    } else if (lowerError.includes("user rejected")) {
       return "Transaction was cancelled by user";
     } else if (lowerError.includes("blockhash not found")) {
       return "Network congestion detected. Please try again in a few moments";
@@ -1294,8 +1308,8 @@ export default function TimeLockForm() {
               height: "120px",
               borderRadius: "16px",
               overflow: "hidden",
-              display: "flex",
-              alignItems: "center",
+          display: "flex",
+          alignItems: "center",
               justifyContent: "center"
             }}>
               <Image
@@ -2060,6 +2074,9 @@ export default function TimeLockForm() {
           transition: all 0.2s !important;
           position: relative !important;
           z-index: 10 !important;
+          cursor: pointer !important;
+          pointer-events: auto !important;
+          user-select: none !important;
         }
         
         :global(.wallet-adapter-button:hover) {
@@ -2070,6 +2087,19 @@ export default function TimeLockForm() {
         :global(.wallet-adapter-button-trigger) {
           background: #14f195 !important;
           color: #0a0a0a !important;
+          cursor: pointer !important;
+          pointer-events: auto !important;
+        }
+        
+        /* ✅ CRITICAL: Ensure wallet button is clickable */
+        :global(.wallet-adapter-button:not(:disabled)) {
+          cursor: pointer !important;
+          pointer-events: auto !important;
+        }
+        
+        :global(.wallet-adapter-button:disabled) {
+          cursor: not-allowed !important;
+          pointer-events: none !important;
         }
         
         /* ✅ CRITICAL: Fix wallet dropdown overlay issues */
@@ -2114,10 +2144,30 @@ export default function TimeLockForm() {
         /* ✅ CRITICAL: Ensure proper z-index stacking */
         :global(.wallet-adapter-modal) {
           z-index: 10000 !important;
+          pointer-events: auto !important;
         }
         
         :global(.wallet-adapter-modal-overlay) {
           z-index: 9999 !important;
+          pointer-events: auto !important;
+        }
+        
+        :global(.wallet-adapter-modal-wrapper) {
+          z-index: 10001 !important;
+          pointer-events: auto !important;
+        }
+        
+        :global(.wallet-adapter-modal-container) {
+          pointer-events: auto !important;
+        }
+        
+        :global(.wallet-adapter-modal-list) {
+          pointer-events: auto !important;
+        }
+        
+        :global(.wallet-adapter-modal-list-item) {
+          pointer-events: auto !important;
+          cursor: pointer !important;
         }
         
         /* Ensure main content doesn't interfere with wallet dropdown */
