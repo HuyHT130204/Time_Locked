@@ -108,6 +108,7 @@ export default function TimeLockForm() {
   const [lockPda, setLockPda] = useState<PublicKey | null>(null);
   const [lockBump, setLockBump] = useState<number | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
   const [balance, setBalance] = useState<number>(0);
   const [usdcBalance, setUsdcBalance] = useState<number>(0);
@@ -536,8 +537,12 @@ export default function TimeLockForm() {
   }, []);
 
   // Fetch balance and time locks
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (showRefreshing = false) => {
     if (!publicKey || !connection) return;
+    
+    if (showRefreshing) {
+      setRefreshing(true);
+    }
     
     try {
       try {
@@ -744,6 +749,10 @@ export default function TimeLockForm() {
       }
     } catch (e) {
       console.error("Error in fetchData:", e);
+    } finally {
+      if (showRefreshing) {
+        setRefreshing(false);
+      }
     }
   }, [publicKey, connection, program, programReady, lockPda, usdcMint]);
 
@@ -1191,10 +1200,13 @@ export default function TimeLockForm() {
         setTxSig(signature);
       }
 
-      // Clear and refresh
+      // Clear and refresh immediately
       setAmount("");
       setUnlock("");
-      setTimeout(() => fetchData(), 8000);
+      
+      // Refresh data immediately after successful transaction
+      console.log("Transaction successful, refreshing data immediately...");
+      await fetchData(true);
 
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1356,7 +1368,9 @@ export default function TimeLockForm() {
         setTxSig(signature);
       }
       
-      setTimeout(() => fetchData(), 8000);
+      // Refresh data immediately after successful withdrawal
+      console.log("Withdrawal successful, refreshing data immediately...");
+      await fetchData(true);
       
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1398,7 +1412,9 @@ export default function TimeLockForm() {
       setTxSig(sig);
       console.log("Airdrop confirmed successfully");
       
-      setTimeout(() => fetchData(), 5000);
+      // Refresh data immediately after successful airdrop
+      console.log("Airdrop successful, refreshing data immediately...");
+      await fetchData(true);
       
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1694,9 +1710,22 @@ export default function TimeLockForm() {
                   fontSize: "1.125rem",
                   fontWeight: "600",
                     color: "#ffffff",
-                    margin: 0
+                    margin: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.5rem"
                 }}>
                   SOL Balance
+                  {refreshing && (
+                    <div style={{
+                      width: "16px",
+                      height: "16px",
+                      border: "2px solid #14f195",
+                      borderTop: "2px solid transparent",
+                      borderRadius: "50%",
+                      animation: "spin 1s linear infinite"
+                    }}></div>
+                  )}
                 </h3>
                 </div>
                 <div style={{
@@ -1806,6 +1835,38 @@ export default function TimeLockForm() {
                     }}
                   >
                     {loading ? "Processing..." : "Airdrop 1 SOL"}
+                  </button>
+                  <button 
+                    onClick={() => fetchData(true)} 
+                    disabled={refreshing}
+                    className="btn-secondary"
+                    style={{
+                      width: "100%",
+                      opacity: refreshing ? 0.5 : 1,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "0.5rem"
+                    }}
+                  >
+                    {refreshing ? (
+                      <>
+                        <div style={{
+                          width: "16px",
+                          height: "16px",
+                          border: "2px solid #ffffff",
+                          borderTop: "2px solid transparent",
+                          borderRadius: "50%",
+                          animation: "spin 1s linear infinite"
+                        }}></div>
+                        Refreshing...
+                      </>
+                    ) : (
+                      <>
+                        <span>🔄</span>
+                        Refresh Data
+                      </>
+                    )}
                   </button>
                   <a
                     href="https://faucet.circle.com/"
@@ -2406,6 +2467,11 @@ export default function TimeLockForm() {
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
+        }
+        
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
         }
         
         /* Wallet button styling */
