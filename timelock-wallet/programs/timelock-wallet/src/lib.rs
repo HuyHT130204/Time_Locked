@@ -5,6 +5,8 @@ use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer as SplTransfer
 declare_id!("8LQG6U5AQKe9t97ogxMtggbr24QgUKNFz22qvVPzBYYe");
 
 const TIME_LOCK_SEED: &[u8] = b"time-lock";
+const TIME_LOCK_SOL_SEED: &[u8] = b"time-lock-sol";
+const TIME_LOCK_SPL_SEED: &[u8] = b"time-lock-spl";
 
 #[program]
 pub mod timelock_wallet {
@@ -115,12 +117,13 @@ pub mod timelock_wallet {
         require!(lock_account.kind == AssetKind::Spl, TimeLockError::WrongAssetKind);
         require!(clock.unix_timestamp >= lock_account.unlock_timestamp, TimeLockError::TimeLockNotExpired);
 
-        let seeds: &[&[u8]] = &[TIME_LOCK_SEED, lock_account.initializer.as_ref(), &[lock_account.bump]];
+        let initializer_key = ctx.accounts.initializer.key();
+        let seeds: &[&[u8]] = &[TIME_LOCK_SPL_SEED, initializer_key.as_ref(), &[lock_account.bump]];
         let signer_seeds: &[&[&[u8]]] = &[seeds];
 
-        // Transfer entire vault balance (or at least the stored amount) back to user
-        let amount = ctx.accounts.vault_ata.amount;
-        require!(amount >= lock_account.amount, TimeLockError::InsufficientVaultBalance);
+        // Transfer entire vault balance back to user
+        let vault_balance = ctx.accounts.vault_ata.amount;
+        require!(vault_balance > 0, TimeLockError::InsufficientVaultBalance);
 
         let cpi_accounts = SplTransfer {
             from: ctx.accounts.vault_ata.to_account_info(),
@@ -132,7 +135,8 @@ pub mod timelock_wallet {
             cpi_accounts,
             signer_seeds,
         );
-        token::transfer(cpi_ctx, lock_account.amount)?;
+        // Transfer the entire vault balance, not just the stored amount
+        token::transfer(cpi_ctx, vault_balance)?;
 
         Ok(())
     }
@@ -170,10 +174,10 @@ pub struct InitializeLockSol<'info> {
     pub initializer: Signer<'info>,
 
     #[account(
-        init,
+        init_if_needed,
         payer = initializer,
         space = 8 + TimeLockAccount::LEN,
-        seeds = [TIME_LOCK_SEED, initializer.key().as_ref()],
+        seeds = [TIME_LOCK_SOL_SEED, initializer.key().as_ref()],
         bump,
     )]
     pub lock_account: Account<'info, TimeLockAccount>,
@@ -186,7 +190,7 @@ pub struct FundSolLock<'info> {
     pub initializer: Signer<'info>,
     #[account(
         mut,
-        seeds = [TIME_LOCK_SEED, initializer.key().as_ref()],
+        seeds = [TIME_LOCK_SOL_SEED, initializer.key().as_ref()],
         bump = lock_account.bump,
     )]
     pub lock_account: Account<'info, TimeLockAccount>,
@@ -199,7 +203,7 @@ pub struct WithdrawSol<'info> {
     pub initializer: Signer<'info>,
     #[account(
         mut,
-        seeds = [TIME_LOCK_SEED, initializer.key().as_ref()],
+        seeds = [TIME_LOCK_SOL_SEED, initializer.key().as_ref()],
         bump = lock_account.bump,
         has_one = initializer,
         close = initializer,
@@ -216,7 +220,7 @@ pub struct InitializeLockSpl<'info> {
         init_if_needed,
         payer = initializer,
         space = 8 + TimeLockAccount::LEN,
-        seeds = [TIME_LOCK_SEED, initializer.key().as_ref()],
+        seeds = [TIME_LOCK_SPL_SEED, initializer.key().as_ref()],
         bump,
     )]
     pub lock_account: Account<'info, TimeLockAccount>,
@@ -249,7 +253,7 @@ pub struct WithdrawSpl<'info> {
     pub initializer: Signer<'info>,
     #[account(
         mut,
-        seeds = [TIME_LOCK_SEED, initializer.key().as_ref()],
+        seeds = [TIME_LOCK_SPL_SEED, initializer.key().as_ref()],
         bump = lock_account.bump,
         has_one = initializer,
     )]
@@ -267,7 +271,7 @@ pub struct WithdrawSpl<'info> {
     #[account(
         mut,
         constraint = vault_ata.owner == lock_account.key(),
-        constraint = vault_ata.mint == lock_account.key(),
+        constraint = vault_ata.mint == mint.key(),
     )]
     pub vault_ata: Account<'info, TokenAccount>,
 

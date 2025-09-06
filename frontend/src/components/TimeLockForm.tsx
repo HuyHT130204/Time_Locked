@@ -14,7 +14,7 @@ import {
 import * as anchor from "@coral-xyz/anchor";
 import { getAnchorProgram } from "@/lib/anchorClient";
 import Image from "next/image";
-import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAccount } from "@solana/spl-token";
 import dynamic from "next/dynamic";
 
 // Dynamic import to prevent hydration mismatch
@@ -24,7 +24,8 @@ const DynamicWalletMultiButton = dynamic(
 );
 
 // Constants - đảm bảo seeds khớp với program
-const TIME_LOCK_SEED = "time-lock";
+const TIME_LOCK_SOL_SEED = "time-lock-sol";
+const TIME_LOCK_SPL_SEED = "time-lock-spl";
 
 interface TimeLockInfo {
   publicKey: PublicKey;
@@ -34,6 +35,7 @@ interface TimeLockInfo {
   kind: "SOL" | "SPL";
   mint?: PublicKey;
   isExpired: boolean;
+  bump?: number;
 }
 
 interface ProgramResult {
@@ -108,6 +110,7 @@ export default function TimeLockForm() {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
   const [balance, setBalance] = useState<number>(0);
+  const [usdcBalance, setUsdcBalance] = useState<number>(0);
   const [timeLocks, setTimeLocks] = useState<TimeLockInfo[]>([]);
   const [mounted, setMounted] = useState<boolean>(false);
   const [programReady, setProgramReady] = useState<boolean>(false);
@@ -447,8 +450,8 @@ export default function TimeLockForm() {
   }, [publicKey, connection, sendTransaction, wallet?.adapter]);
 
   // Enhanced input validation
-  const validateInputs = useCallback((amount: string, unlock: string, asset: "SOL" | "SPL", balance: number) => {
-    console.log("Validating inputs:", { amount, unlock, asset, balance });
+  const validateInputs = useCallback((amount: string, unlock: string, asset: "SOL" | "SPL", balance: number, usdcBalance: number = 0) => {
+    console.log("Validating inputs:", { amount, unlock, asset, balance, usdcBalance });
     
     const trimmedAmount = amount.trim();
     if (!trimmedAmount || trimmedAmount === "") {
@@ -483,6 +486,12 @@ export default function TimeLockForm() {
       const feeReserve = 0.01;
       if ((balance - amountParsed) < feeReserve) {
         throw new Error(`Please leave at least ${feeReserve} SOL for transaction fees. Current balance: ${balance.toFixed(4)} SOL`);
+      }
+    }
+    
+    if (asset === "SPL") {
+      if (amountParsed > usdcBalance) {
+        throw new Error(`Insufficient USDC balance. Available: ${usdcBalance.toFixed(2)} USDC, Requested: ${amountParsed} USDC`);
       }
     }
     
@@ -539,55 +548,58 @@ export default function TimeLockForm() {
         setBalance(0);
       }
       
-      if (program && programReady && lockPda) {
+      // Fetch USDC balance
+      try {
+        const userAta = getAssociatedTokenAddressSync(usdcMint, publicKey);
+        const tokenAccount = await getAccount(connection, userAta);
+        const mintInfo = await connection.getParsedAccountInfo(usdcMint);
+        const decimals = mintInfo.value?.data && 'parsed' in mintInfo.value.data 
+          ? mintInfo.value.data.parsed.info.decimals 
+          : 6; // Default to 6 if can't get decimals
+        setUsdcBalance(Number(tokenAccount.amount) / Math.pow(10, decimals));
+        console.log("USDC balance fetch:", {
+          rawAmount: tokenAccount.amount.toString(),
+          decimals,
+          calculatedBalance: Number(tokenAccount.amount) / Math.pow(10, decimals)
+        });
+      } catch (usdcBalanceError) {
+        console.log("No USDC token account found or error fetching USDC balance:", usdcBalanceError);
+        setUsdcBalance(0);
+      }
+      
+      if (program && programReady) {
         console.log("Fetching time locks...");
         const locks: TimeLockInfo[] = [];
         
         try {
-          console.log("Checking PDA:", lockPda.toString());
+          // Check both SOL and SPL locks
+          const [solPda, solBump] = PublicKey.findProgramAddressSync(
+            [Buffer.from(TIME_LOCK_SOL_SEED), publicKey.toBuffer()],
+            program.programId
+          );
           
-          const accountInfo = await connection.getAccountInfo(lockPda);
-          if (!accountInfo) {
-            console.log("No lock account found");
-            setTimeLocks([]);
-            return;
-          }
-
-          let lockAccount;
-          try {
-            lockAccount = await program.account.timeLockAccount.fetch(lockPda);
-          } catch {
-            try {
-              lockAccount = await program.account.lockAccount.fetch(lockPda);
-            } catch {
-              try {
-                lockAccount = await program.account.lock_account.fetch(lockPda);
-              } catch {
-                console.log("Could not fetch account with any known name");
-                return;
-              }
-            }
-          }
+          const [splPda, splBump] = PublicKey.findProgramAddressSync(
+            [Buffer.from(TIME_LOCK_SPL_SEED), publicKey.toBuffer()],
+            program.programId
+          );
           
-          console.log("Raw lock account data:", lockAccount);
+          console.log("Checking PDAs:", {
+            solPda: solPda.toString(),
+            splPda: splPda.toString()
+          });
           
-          if (lockAccount) {
+          // Check SOL lock
+          const solAccountInfo = await connection.getAccountInfo(solPda);
+          if (solAccountInfo) {
+            console.log("Found SOL lock account");
+            const lockAccount = await program.account.timeLockAccount.fetch(solPda);
+            // Process SOL lock...
             const initializer = lockAccount.initializer as PublicKey;
             const amount = lockAccount.amount as BN;
             const unlockTimestamp = lockAccount.unlockTimestamp as BN;
             const kind = lockAccount.kind;
-            const mint = lockAccount.mint as PublicKey | null;
-            
-            console.log("Parsed account data:", {
-              initializer: initializer?.toString(),
-              amount: amount?.toString(),
-              unlockTimestamp: unlockTimestamp?.toString(),
-              kind,
-              mint: mint?.toString()
-            });
             
             let assetKind: "SOL" | "SPL" = "SOL";
-            
             if (isAssetKind(kind)) {
               if ('spl' in kind || 'Spl' in kind) {
                 assetKind = "SPL";
@@ -600,16 +612,129 @@ export default function TimeLockForm() {
             
             const isExpired = Date.now() / 1000 >= unlockTimestamp.toNumber();
             
-            locks.push({
-              publicKey: lockPda,
-              initializer: initializer,
-              amount: assetKind === "SOL" ? amount.toNumber() / LAMPORTS_PER_SOL : amount.toNumber(),
-              unlockTimestamp: unlockTimestamp.toNumber(),
-              kind: assetKind,
-              mint: mint || undefined,
+            // Calculate proper amount based on asset kind - use actual vault balance
+            let displayAmount: number;
+            if (assetKind === "SOL") {
+              // For SOL, use the actual account balance (lamports)
+              displayAmount = (solAccountInfo?.lamports || 0) / LAMPORTS_PER_SOL;
+            } else {
+              // For SPL tokens, we need to get the actual vault ATA balance
+              try {
+                const mint = lockAccount.mint as PublicKey;
+                const vaultAta = getAssociatedTokenAddressSync(mint, solPda, true);
+                const vaultAccountInfo = await connection.getTokenAccountBalance(vaultAta);
+                const actualBalance = vaultAccountInfo.value.amount;
+                
+                const mintInfo = await connection.getParsedAccountInfo(mint!);
+                const decimals = mintInfo.value?.data && 'parsed' in mintInfo.value.data 
+                  ? mintInfo.value.data.parsed.info.decimals 
+                  : 6; // Default to 6 for USDC
+                displayAmount = parseInt(actualBalance) / Math.pow(10, decimals);
+              } catch {
+                // Fallback to stored amount if vault check fails
+                displayAmount = amount.toNumber() / Math.pow(10, 6);
+              }
+            }
+
+            // Only add lock if it has a positive balance
+            console.log("SOL lock balance check:", {
+              displayAmount,
+              willAdd: displayAmount > 0,
+              assetKind,
               isExpired
             });
+            
+            if (displayAmount > 0) {
+              locks.push({
+                publicKey: solPda,
+                initializer: initializer,
+                amount: displayAmount,
+                unlockTimestamp: unlockTimestamp.toNumber(),
+                kind: assetKind,
+                mint: lockAccount.mint as PublicKey || undefined,
+                isExpired,
+                bump: lockAccount.bump as number
+              });
+            }
           }
+          
+          // Check SPL lock
+          const splAccountInfo = await connection.getAccountInfo(splPda);
+          if (splAccountInfo) {
+            console.log("Found SPL lock account");
+            const lockAccount = await program.account.timeLockAccount.fetch(splPda);
+            // Process SPL lock...
+            const initializer = lockAccount.initializer as PublicKey;
+            const amount = lockAccount.amount as BN;
+            const unlockTimestamp = lockAccount.unlockTimestamp as BN;
+            const kind = lockAccount.kind;
+            
+            let assetKind: "SOL" | "SPL" = "SPL";
+            if (isAssetKind(kind)) {
+              if ('spl' in kind || 'Spl' in kind) {
+                assetKind = "SPL";
+              } else {
+                assetKind = "SOL";
+              }
+            } else if (typeof kind === 'string') {
+              assetKind = kind.toUpperCase() === 'SPL' ? 'SPL' : 'SOL';
+            }
+            
+            const isExpired = Date.now() / 1000 >= unlockTimestamp.toNumber();
+            
+            // Calculate proper amount based on asset kind - use actual vault balance
+            let displayAmount: number;
+            if (assetKind === "SOL") {
+              // For SOL, use the actual account balance (lamports)
+              displayAmount = (splAccountInfo?.lamports || 0) / LAMPORTS_PER_SOL;
+            } else {
+              // For SPL tokens, we need to get the actual vault ATA balance
+              try {
+                const mint = lockAccount.mint as PublicKey;
+                const vaultAta = getAssociatedTokenAddressSync(mint, splPda, true);
+                const vaultAccountInfo = await connection.getTokenAccountBalance(vaultAta);
+                const actualBalance = vaultAccountInfo.value.amount;
+                
+                const mintInfo = await connection.getParsedAccountInfo(mint!);
+                const decimals = mintInfo.value?.data && 'parsed' in mintInfo.value.data 
+                  ? mintInfo.value.data.parsed.info.decimals 
+                  : 6; // Default to 6 for USDC
+                displayAmount = parseInt(actualBalance) / Math.pow(10, decimals);
+              } catch {
+                // Fallback to stored amount if vault check fails
+                displayAmount = amount.toNumber() / Math.pow(10, 6);
+              }
+            }
+            
+            // Only add lock if it has a positive balance
+            console.log("SPL lock balance check:", {
+              displayAmount,
+              willAdd: displayAmount > 0,
+              assetKind,
+              isExpired,
+              mint: lockAccount.mint?.toString()
+            });
+            
+            if (displayAmount > 0) {
+              locks.push({
+                publicKey: splPda,
+                initializer: initializer,
+                amount: displayAmount,
+                unlockTimestamp: unlockTimestamp.toNumber(),
+                kind: assetKind,
+                mint: lockAccount.mint as PublicKey || undefined,
+                isExpired,
+                bump: lockAccount.bump as number
+              });
+            }
+          }
+          
+          if (locks.length === 0) {
+            console.log("No lock accounts found");
+            setTimeLocks([]);
+            return;
+          }
+
         } catch (fetchError) {
           console.log("Error fetching lock account:", fetchError);
         }
@@ -620,7 +745,7 @@ export default function TimeLockForm() {
     } catch (e) {
       console.error("Error in fetchData:", e);
     }
-  }, [publicKey, connection, program, programReady, lockPda]);
+  }, [publicKey, connection, program, programReady, lockPda, usdcMint]);
 
   useEffect(() => {
     if (mounted) {
@@ -633,8 +758,9 @@ export default function TimeLockForm() {
   useEffect(() => {
     if (!publicKey || !program || !mounted || !programReady) return;
     try {
+      // Use SOL seed by default, will be updated based on asset type when creating lock
       const [pda, bump] = PublicKey.findProgramAddressSync(
-        [Buffer.from(TIME_LOCK_SEED), publicKey.toBuffer()],
+        [Buffer.from(TIME_LOCK_SOL_SEED), publicKey.toBuffer()],
         program.programId
       );
       setLockPda(pda);
@@ -672,7 +798,7 @@ export default function TimeLockForm() {
         throw new Error("Wallet disconnected. Please reconnect and try again.");
       }
 
-      const { amountParsed, unlockTs } = validateInputs(amount, unlock, asset, balance);
+      const { amountParsed, unlockTs } = validateInputs(amount, unlock, asset, balance, usdcBalance);
 
       console.log("Input validation passed:", {
         asset,
@@ -685,6 +811,12 @@ export default function TimeLockForm() {
       if (asset === "SOL") {
         console.log("Creating SOL lock...");
 
+        // ✅ CRITICAL: Tạo PDA riêng cho SOL
+        const [solPda, solBump] = PublicKey.findProgramAddressSync(
+          [Buffer.from(TIME_LOCK_SOL_SEED), publicKey.toBuffer()],
+          program.programId
+        );
+
         // ✅ CRITICAL FIX: Sử dụng BN cho instruction arguments
         const amountLamports = Math.floor(amountParsed * LAMPORTS_PER_SOL);
         const unlockTimestamp = unlockTs;
@@ -693,7 +825,9 @@ export default function TimeLockForm() {
           amountParsed,
           amountLamports,
           unlockTimestamp,
-          LAMPORTS_PER_SOL
+          LAMPORTS_PER_SOL,
+          solPda: solPda.toString(),
+          solBump
         });
 
         // ✅ CRITICAL: Thử sử dụng anchor.BN với constructor khác
@@ -840,7 +974,7 @@ export default function TimeLockForm() {
         const initInstruction = new TransactionInstruction({
           keys: [
             { pubkey: publicKey, isSigner: true, isWritable: true },
-            { pubkey: lockPda, isSigner: false, isWritable: true },
+            { pubkey: solPda, isSigner: false, isWritable: true },
             { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }
           ],
           programId: program.programId,
@@ -881,7 +1015,7 @@ export default function TimeLockForm() {
         // Transfer instruction
         const transferInstruction = SystemProgram.transfer({
           fromPubkey: publicKey,
-          toPubkey: lockPda,
+          toPubkey: solPda,
           lamports: amountLamports // Raw number for SystemProgram.transfer
         });
 
@@ -911,6 +1045,12 @@ export default function TimeLockForm() {
         console.log("Creating SPL lock...");
 
         if (!usdcMint) throw new Error("Missing USDC mint configuration");
+
+        // ✅ CRITICAL: Tạo PDA riêng cho SPL
+        const [splPda, splBump] = PublicKey.findProgramAddressSync(
+          [Buffer.from(TIME_LOCK_SPL_SEED), publicKey.toBuffer()],
+          program.programId
+        );
 
         const amountTokens = Math.floor(amountParsed * Math.pow(10, 6));
         const unlockTimestamp = unlockTs;
@@ -964,7 +1104,7 @@ export default function TimeLockForm() {
         }
 
         const userAta = getAssociatedTokenAddressSync(usdcMint, publicKey);
-        const vaultAta = getAssociatedTokenAddressSync(usdcMint, lockPda, true);
+        const vaultAta = getAssociatedTokenAddressSync(usdcMint, splPda, true);
 
         // ✅ CRITICAL: Debug values cho SPL
         console.log("Final SPL values before instruction:", {
@@ -976,48 +1116,78 @@ export default function TimeLockForm() {
           unlockTimestampIsNumber: Number.isInteger(unlockTimestamp)
         });
 
-        let instruction;
-        try {
-          // ✅ CRITICAL: Sử dụng đúng tên instruction từ IDL (snake_case)
-          instruction = await program.methods
-            .initialize_lock_spl(amountBNSimple, timestampBNSimple) // <-- SNAKE_CASE từ IDL
-            .accounts({
-              initializer: publicKey,
-              lock_account: lockPda,
-              mint: usdcMint,
-              user_ata: userAta,
-              vault_ata: vaultAta,
-              token_program: TOKEN_PROGRAM_ID,
-              associated_token_program: ASSOCIATED_TOKEN_PROGRAM_ID,
-              system_program: SystemProgram.programId,
-            })
-            .instruction();
-          console.log("✅ snake_case instruction name worked for SPL!");
-        } catch (snakeCaseError) {
-          console.log("snake_case instruction name failed for SPL:", snakeCaseError);
-          try {
-            // Fallback to camelCase
-            instruction = await program.methods
-              .initializeLockSpl(amountBNSimple, timestampBNSimple) // <-- CAMELCASE fallback
-            .accounts({
-              initializer: publicKey,
-              lockAccount: lockPda,
-              mint: usdcMint,
-              userAta: userAta,
-              vaultAta: vaultAta,
-              tokenProgram: TOKEN_PROGRAM_ID,
-              associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-              systemProgram: SystemProgram.programId,
-            })
-            .instruction();
-            console.log("✅ camelCase fallback worked for SPL!");
-        } catch (camelCaseError) {
-            console.log("Both instruction naming conventions failed for SPL:", camelCaseError);
-            throw camelCaseError;
-          }
+        // ✅ CRITICAL: Sử dụng raw instruction building như SOL để tránh serialization issues
+        console.log("Building raw SPL instruction...");
+        
+        // Tạo raw instruction data cho initialize_lock_spl
+        const rawInstructionData = Buffer.alloc(8 + 8 + 8); // discriminator + u64 + i64
+        
+        // Discriminator cho initialize_lock_spl từ IDL
+        const discriminator = Buffer.from([22, 210, 180, 61, 49, 142, 45, 32]);
+        rawInstructionData.set(discriminator, 0);
+        
+        // Serialize amount (u64) as little-endian
+        const amountBuffer = Buffer.alloc(8);
+        const amountBigInt = BigInt(amountTokens);
+        for (let i = 0; i < 8; i++) {
+          amountBuffer[i] = Number((amountBigInt >> BigInt(i * 8)) & BigInt(0xFF));
         }
+        rawInstructionData.set(amountBuffer, 8);
+        
+        // Serialize unlock_timestamp (i64) as little-endian
+        const timestampBuffer = Buffer.alloc(8);
+        const timestampBigInt = BigInt(unlockTimestamp);
+        for (let i = 0; i < 8; i++) {
+          timestampBuffer[i] = Number((timestampBigInt >> BigInt(i * 8)) & BigInt(0xFF));
+        }
+        rawInstructionData.set(timestampBuffer, 16);
+        
+        console.log("Raw SPL instruction data:", {
+          discriminator: discriminator.toString('hex'),
+          amountTokens: amountTokens,
+          amountBigInt: amountBigInt.toString(),
+          amountHex: amountBuffer.toString('hex'),
+          unlockTimestamp: unlockTimestamp,
+          timestampBigInt: timestampBigInt.toString(),
+          timestampHex: timestampBuffer.toString('hex'),
+          fullData: rawInstructionData.toString('hex')
+        });
+        
+        const initInstruction = new TransactionInstruction({
+          keys: [
+            { pubkey: publicKey, isSigner: true, isWritable: true },
+            { pubkey: splPda, isSigner: false, isWritable: true },
+            { pubkey: usdcMint, isSigner: false, isWritable: false },
+            { pubkey: userAta, isSigner: false, isWritable: true },
+            { pubkey: vaultAta, isSigner: false, isWritable: true },
+            { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+            { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+            { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }
+          ],
+          programId: program.programId,
+          data: rawInstructionData
+        });
+        
+        console.log("✅ Raw SPL instruction created successfully!");
 
-        const signature = await sendTransactionSafely(instruction, "SPL lock creation");
+        // Create transaction
+        const transaction = new Transaction();
+        
+        transaction.add(
+          ComputeBudgetProgram.setComputeUnitPrice({
+            microLamports: 1000,
+          })
+        );
+        
+        transaction.add(
+          ComputeBudgetProgram.setComputeUnitLimit({
+            units: 400000,
+          })
+        );
+        
+        transaction.add(initInstruction);
+
+        const signature = await sendTransactionSafely(transaction, "SPL lock creation");
         setTxSig(signature);
       }
 
@@ -1033,7 +1203,7 @@ export default function TimeLockForm() {
     } finally {
       setLoading(false);
     }
-  }, [asset, amount, connected, lockPda, lockBump, program, publicKey, unlock, usdcMint, fetchData, programReady, balance, loading, sendTransactionSafely, wallet?.adapter, validateInputs]);
+  }, [asset, amount, connected, lockPda, lockBump, program, publicKey, unlock, usdcMint, fetchData, programReady, balance, usdcBalance, loading, sendTransactionSafely, wallet?.adapter, validateInputs]);
 
   const withdraw = useCallback(async (targetLock?: TimeLockInfo) => {
     if (!connected || !publicKey || !program || !lockPda || !programReady) {
@@ -1077,6 +1247,12 @@ export default function TimeLockForm() {
       if (lockToWithdraw.kind === "SOL") {
         console.log("Withdrawing SOL lock");
 
+        // ✅ CRITICAL: Tạo PDA riêng cho SOL
+        const [solPda, solBump] = PublicKey.findProgramAddressSync(
+          [Buffer.from(TIME_LOCK_SOL_SEED), publicKey.toBuffer()],
+          program.programId
+        );
+
         // ✅ CRITICAL FIX: Raw instruction building for SOL withdrawal
         console.log("Building raw SOL withdrawal instruction...");
         
@@ -1095,7 +1271,7 @@ export default function TimeLockForm() {
         const instruction = new TransactionInstruction({
           keys: [
             { pubkey: publicKey, isSigner: true, isWritable: true },
-            { pubkey: lockPda, isSigner: false, isWritable: true },
+            { pubkey: solPda, isSigner: false, isWritable: true },
             { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }
           ],
           programId: program.programId,
@@ -1108,42 +1284,73 @@ export default function TimeLockForm() {
         setTxSig(signature);
         
       } else {
-        if (!usdcMint) throw new Error("Missing USDC mint configuration");
+        if (!lockToWithdraw.mint) throw new Error("Missing mint information for SPL lock");
 
-        const userAta = getAssociatedTokenAddressSync(usdcMint, publicKey);
-        const vaultAta = getAssociatedTokenAddressSync(usdcMint, lockPda, true);
+        // ✅ CRITICAL: Tạo PDA với đúng seeds và bump từ lock account
+        const [splPda, splBump] = PublicKey.findProgramAddressSync(
+          [Buffer.from(TIME_LOCK_SPL_SEED), publicKey.toBuffer()],
+          program.programId
+        );
+        
+        console.log("Using PDA with correct seeds and bump:", {
+          lockPublicKey: lockToWithdraw.publicKey.toString(),
+          splPda: splPda.toString(),
+          splBump: splBump,
+          lockBump: lockToWithdraw.bump,
+          mint: lockToWithdraw.mint?.toString(),
+          pdaMatches: lockToWithdraw.publicKey.toString() === splPda.toString()
+        });
 
-        console.log("Withdrawing SPL lock");
+        const userAta = getAssociatedTokenAddressSync(lockToWithdraw.mint, publicKey);
+        // ✅ CRITICAL: Tạo vault ATA với PDA thực tế từ lock account
+        const vaultAta = getAssociatedTokenAddressSync(lockToWithdraw.mint, splPda, true);
 
-        // ✅ CRITICAL FIX: Raw instruction building for SPL withdrawal
+        console.log("Withdrawing SPL lock", {
+          lockPublicKey: lockToWithdraw.publicKey.toString(),
+          splPda: splPda.toString(),
+          mint: lockToWithdraw.mint.toString(),
+          userAta: userAta.toString(),
+          vaultAta: vaultAta.toString(),
+          pdaMatches: lockToWithdraw.publicKey.toString() === splPda.toString()
+        });
+
+        // ✅ CRITICAL FIX: Sử dụng raw instruction thay vì Anchor method
         console.log("Building raw SPL withdrawal instruction...");
         
-        // Tạo raw instruction data cho withdraw_spl
-        const rawInstructionData = Buffer.alloc(8); // Chỉ có discriminator
-        const discriminator = Buffer.from([181, 154, 94, 86, 62, 115, 6, 186]); // withdraw_spl discriminator từ IDL
+        // ✅ Sử dụng discriminator từ IDL: [181, 154, 94, 86, 62, 115, 6, 186]
+        const discriminator = Buffer.from([181, 154, 94, 86, 62, 115, 6, 186]);
         
-        rawInstructionData.set(discriminator, 0);
+        // ✅ Tạo instruction data (chỉ có discriminator, không có args)
+        const instructionData = Buffer.concat([discriminator]);
         
         console.log("Raw SPL withdrawal instruction data:", {
-          hex: rawInstructionData.toString('hex'),
-          length: rawInstructionData.length,
-          discriminator: discriminator.toString('hex')
+          discriminator: Array.from(discriminator),
+          instructionDataLength: instructionData.length,
+          accounts: {
+            initializer: publicKey.toString(),
+            lock_account: splPda.toString(),
+            mint: lockToWithdraw.mint.toString(),
+            user_ata: userAta.toString(),
+            vault_ata: vaultAta.toString(),
+            token_program: TOKEN_PROGRAM_ID.toString(),
+          }
         });
         
+        // ✅ Tạo raw instruction
         const instruction = new TransactionInstruction({
           keys: [
             { pubkey: publicKey, isSigner: true, isWritable: true },
-            { pubkey: lockPda, isSigner: false, isWritable: true },
-            { pubkey: usdcMint, isSigner: false, isWritable: false },
+            { pubkey: splPda, isSigner: false, isWritable: true },
+            { pubkey: lockToWithdraw.mint, isSigner: false, isWritable: false },
             { pubkey: userAta, isSigner: false, isWritable: true },
             { pubkey: vaultAta, isSigner: false, isWritable: true },
-            { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }
+            { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
           ],
           programId: program.programId,
-          data: rawInstructionData
+          data: instructionData,
         });
         
-        console.log("✅ Raw SPL withdrawal instruction created successfully!");
+        console.log("✅ SPL withdrawal instruction created successfully!");
         
         const signature = await sendTransactionSafely(instruction, "SPL withdrawal");
         setTxSig(signature);
@@ -1450,12 +1657,13 @@ export default function TimeLockForm() {
         {connected && (
           <>
             {/* Balance and Actions */}
-            <div style={{
+            <div className="balance-grid" style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-              gap: "1.5rem"
+              gridTemplateColumns: "repeat(4, 1fr)",
+              gap: "1rem",
+              alignItems: "stretch"
             }}>
-              <div style={{
+              <div className="balance-card" style={{
                 borderRadius: "1rem",
                 padding: "1.5rem",
                 background: "rgba(255, 255, 255, 0.05)",
@@ -1488,7 +1696,7 @@ export default function TimeLockForm() {
                     color: "#ffffff",
                     margin: 0
                 }}>
-                  Wallet Balance
+                  SOL Balance
                 </h3>
                 </div>
                 <div style={{
@@ -1507,7 +1715,52 @@ export default function TimeLockForm() {
                 </div>
               </div>
               
+              <div className="balance-card" style={{
+                borderRadius: "1rem",
+                padding: "1.5rem",
+                background: "rgba(255, 255, 255, 0.05)",
+                border: "1px solid rgba(255, 255, 255, 0.1)",
+                backdropFilter: "blur(10px)"
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
               <div style={{
+                    width: "40px",
+                    height: "40px",
+                    borderRadius: "8px",
+                    overflow: "hidden",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "linear-gradient(135deg, #2775ca 0%, #1e40af 100%)"
+                  }}>
+                    <span style={{ color: "#ffffff", fontWeight: "bold", fontSize: "16px" }}>💵</span>
+                  </div>
+                <h3 style={{
+                  fontSize: "1.125rem",
+                  fontWeight: "600",
+                    color: "#ffffff",
+                    margin: 0
+                }}>
+                  USDC Balance
+                </h3>
+                </div>
+                <div style={{
+                  fontSize: "1.875rem",
+                  fontWeight: "700",
+                  color: "#3b82f6",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem"
+                }}>
+                  {usdcBalance.toFixed(2)} 
+                  <span style={{
+                    fontSize: "1.25rem",
+                    color: "#ffffff"
+                  }}>USDC</span>
+                </div>
+              </div>
+              
+              <div className="balance-card" style={{
                 borderRadius: "1rem",
                 padding: "1.5rem",
                 background: "rgba(255, 255, 255, 0.05)",
@@ -1555,7 +1808,7 @@ export default function TimeLockForm() {
                     {loading ? "Processing..." : "Airdrop 1 SOL"}
                   </button>
                   <a
-                    href={process.env.NEXT_PUBLIC_USDC_FAUCET_URL || "https://solfaucet.com/"}
+                    href="https://faucet.circle.com/"
                     target="_blank"
                     rel="noreferrer"
                     style={{
@@ -1640,21 +1893,44 @@ export default function TimeLockForm() {
                 Create New Time Lock
               </h3>
               </div>
-              <div style={{
+              <div className="form-grid" style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                gap: "1rem",
-                marginBottom: "1.5rem"
+                gridTemplateColumns: "1fr 1.5fr 1.5fr",
+                gap: "0.5rem",
+                marginBottom: "1rem",
+                alignItems: "end",
+                padding: "0 0.5rem"
               }}>
+                <div style={{ position: "relative" }}>
                 <select 
                   value={asset} 
                   onChange={(e) => setAsset(e.target.value === "SPL" ? "SPL" : "SOL")} 
                   className="input-field"
                   disabled={loading}
-                >
-                  <option value="SOL">SOL</option>
-                  <option value="SPL">USDC (SPL)</option>
+                    style={{
+                      appearance: "none",
+                      backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%23ffffff' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e")`,
+                      backgroundPosition: "right 0.75rem center",
+                      backgroundRepeat: "no-repeat",
+                      backgroundSize: "1.5em 1.5em",
+                      paddingRight: "2.5rem",
+                      cursor: loading ? "not-allowed" : "pointer",
+                      color: "#ffffff"
+                    }}
+                  >
+                    <option value="SOL" style={{ 
+                      background: "#1f2937", 
+                      color: "#ffffff",
+                      padding: "0.5rem"
+                    }}>SOL</option>
+                    <option value="SPL" style={{ 
+                      background: "#1f2937", 
+                      color: "#ffffff",
+                      padding: "0.5rem"
+                    }}>USDC (SPL)</option>
                 </select>
+                </div>
+                <div style={{ position: "relative" }}>
                 <input
                   type="number"
                   step={asset === "SOL" ? "0.0001" : "0.000001"}
@@ -1664,7 +1940,16 @@ export default function TimeLockForm() {
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   disabled={loading}
-                />
+                    style={{
+                      paddingLeft: "2.5rem",
+                      backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236b7280'%3e%3cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1'/%3e%3c/svg%3e")`,
+                      backgroundPosition: "left 0.75rem center",
+                      backgroundRepeat: "no-repeat",
+                      backgroundSize: "1.25em 1.25em"
+                    }}
+                  />
+                </div>
+                <div style={{ position: "relative" }}>
                 <input
                   type="datetime-local"
                   className="input-field"
@@ -1672,7 +1957,16 @@ export default function TimeLockForm() {
                   onChange={(e) => setUnlock(e.target.value)}
                   min={getMinDateTime()}
                   disabled={loading}
-                />
+                    style={{
+                      paddingLeft: "2.5rem",
+                      backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236b7280'%3e%3cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z'/%3e%3c/svg%3e")`,
+                      backgroundPosition: "left 0.75rem center",
+                      backgroundRepeat: "no-repeat",
+                      backgroundSize: "1.25em 1.25em",
+                      colorScheme: "dark"
+                    }}
+                  />
+                </div>
               </div>
               
               {/* Validation messages */}
@@ -1693,6 +1987,16 @@ export default function TimeLockForm() {
                   marginBottom: "0.5rem"
                 }}>
                   Insufficient balance. Available: {balance.toFixed(4)} SOL
+                </div>
+              )}
+              
+              {amount && asset === "SPL" && isAmountValid(amount) && parseFloat(amount) > usdcBalance && (
+                <div style={{
+                  color: "#fbbf24",
+                  fontSize: "0.875rem",
+                  marginBottom: "0.5rem"
+                }}>
+                  Insufficient USDC balance. Available: {usdcBalance.toFixed(2)} USDC
                 </div>
               )}
               
@@ -1726,7 +2030,8 @@ export default function TimeLockForm() {
                   !programReady || 
                   !isAmountValid(amount) ||
                   !isUnlockTimeValid(unlock) ||
-                  (asset === "SOL" && parseFloat(amount) > balance)
+                  (asset === "SOL" && parseFloat(amount) > balance) ||
+                  (asset === "SPL" && parseFloat(amount) > usdcBalance)
                 } 
                 className="btn-primary"
                 style={{
@@ -1741,7 +2046,8 @@ export default function TimeLockForm() {
                     !programReady || 
                     !isAmountValid(amount) ||
                     !isUnlockTimeValid(unlock) ||
-                    (asset === "SOL" && parseFloat(amount) > balance)
+                    (asset === "SOL" && parseFloat(amount) > balance) ||
+                    (asset === "SPL" && parseFloat(amount) > usdcBalance)
                   ) ? 0.5 : 1
                 }}
               >
@@ -1762,7 +2068,7 @@ export default function TimeLockForm() {
 
             {/* Time Locks List */}
             {timeLocks.length > 0 && (
-              <div style={{
+              <div className="balance-card" style={{
                 borderRadius: "1rem",
                 padding: "1.5rem",
                 background: "rgba(255, 255, 255, 0.05)",
@@ -2042,12 +2348,23 @@ export default function TimeLockForm() {
           font-size: 0.875rem;
           transition: border-color 0.2s;
           backdropFilter: blur(10px);
+          height: 2.75rem;
+          box-sizing: border-box;
+          width: 100%;
+          min-width: 0;
         }
         
         .input-field:focus {
           outline: none;
           border-color: #14f195;
           box-shadow: 0 0 0 2px rgba(20, 241, 149, 0.1);
+          transform: translateY(-1px);
+          transition: all 0.2s ease;
+        }
+        
+        .input-field:hover:not(:disabled) {
+          border-color: rgba(255, 255, 255, 0.3);
+          background: rgba(255, 255, 255, 0.08);
         }
         
         .input-field:disabled {
@@ -2057,6 +2374,33 @@ export default function TimeLockForm() {
         
         .input-field::placeholder {
           color: #9ca3af;
+        }
+        
+        /* Custom select styling */
+        select.input-field {
+          color: #ffffff !important;
+        }
+        
+        select.input-field option {
+          background: #1f2937 !important;
+          color: #ffffff !important;
+          padding: 0.5rem !important;
+        }
+        
+        select.input-field:focus {
+          color: #ffffff !important;
+        }
+        
+        .balance-card {
+          transition: all 0.3s ease;
+          cursor: default;
+        }
+        
+        .balance-card:hover {
+          transform: translateY(-2px);
+          background: rgba(255, 255, 255, 0.08);
+          border-color: rgba(255, 255, 255, 0.2);
+          box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
         }
         
         @keyframes pulse {
@@ -2176,7 +2520,44 @@ export default function TimeLockForm() {
           z-index: 1;
         }
         
+        /* Form grid improvements */
+        .form-grid {
+          display: grid;
+          grid-template-columns: 1fr 1.5fr 1.5fr;
+          gap: 0.5rem;
+          margin-bottom: 1rem;
+          align-items: end;
+          max-width: 100%;
+        }
+        
+        .form-grid > div {
+          display: flex;
+          flex-direction: column;
+          min-width: 0;
+        }
+        
+        @media (max-width: 1024px) {
+          .form-grid {
+            grid-template-columns: 1fr 1.2fr 1.2fr;
+            gap: 0.4rem;
+          }
+        }
+        
+        @media (max-width: 900px) {
+          .form-grid {
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 0.3rem;
+          }
+        }
+        
         /* Responsive design */
+        @media (max-width: 1200px) {
+          .balance-grid {
+            grid-template-columns: repeat(2, 1fr) !important;
+            gap: 1rem !important;
+          }
+        }
+        
         @media (max-width: 768px) {
           .glass-effect {
             padding: 1rem !important;
@@ -2194,6 +2575,25 @@ export default function TimeLockForm() {
           
           .header-right {
             align-items: flex-start !important;
+          }
+          
+          /* Mobile balance grid */
+          .balance-grid {
+            grid-template-columns: 1fr !important;
+            gap: 1rem !important;
+          }
+          
+          /* Mobile form grid */
+          .form-grid {
+            grid-template-columns: 1fr !important;
+            gap: 0.75rem !important;
+            align-items: stretch !important;
+          }
+        }
+        
+        @media (max-width: 480px) {
+          .form-grid {
+            gap: 0.5rem !important;
           }
         }
         {/* Footer */}
